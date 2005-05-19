@@ -1,5 +1,9 @@
 Revision history for Maypole-Plugin-Session
 
+0.02    Thur 19 May, 2005 16:50
+        - placing authenticate() into the Maypole package was unnecessary and breaks 
+            mod_perl apps that don't use sessions.
+
 0.01    Wed  18 May, 2005 16:00
         First version, released on an unsuspecting world.
 

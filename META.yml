@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name: Maypole-Plugin-Session
-version: 0.01
+version: 0.02
 author:
   - David Baird <cpan@riverside-cms.co.uk>
 abstract: simple sessions for Maypole
@@ -12,5 +12,5 @@ requires:
 provides:
   Maypole::Plugin::Session:
     file: lib/Maypole/Plugin/Session.pm
-    version: 0.01
+    version: 0.02
 generated_by: Module::Build version 0.2609

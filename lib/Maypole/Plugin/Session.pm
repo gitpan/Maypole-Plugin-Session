@@ -19,7 +19,7 @@ Maypole::Plugin::Session - simple sessions for Maypole
 
 =cut
 
-our $VERSION = 0.01;
+our $VERSION = 0.02;
 
 =head1 SYNOPSIS
 
@@ -34,37 +34,72 @@ L<Maypole::Plugin::Authentication::UserSessionCookie|Maypole::Plugin::Authentica
 has a cryptic paragraph explaining how to use that module to support basic sessions without users. This 
 module saves you from having to figure it out. 
 
-Provides C<get_session>, C<session> and C<delete_session> methods for your Maypole request class. 
+Provides C<session> and C<delete_session> methods for your Maypole request class. 
 
-=head1 METHODS
+=head1 PUBLIC METHODS
 
 =over 4
-
-=item get_session
-
-If you have your own C<authenticate> method, make sure you call this method on the Maypole 
-request object. 
-
-If you don't have your own C<authenticate> method, this is done for you.   
 
 =item session
 
 Returns the session object/hash.
+
+=item delete_session
+
+Deletes the session and cookie.
+
+=cut
+
+# like MP::P::Authentication::UserSessionCookie::logout()
+sub delete_session
+{
+    my ( $r ) = @_;
+    
+    if ( $r->session ) 
+    {
+        my $s = tied( %{$r->session} );
+        
+        $s->delete if ref $s;
+    }
+    
+    $r->_delete_cookie;
+}
+
+=back
+
+=head1 PRIVATE METHODS
+
+These are only necessary if you are writing custom C<authenticate> method(s). 
+Otherwise, they are called for you.
+
+=over 4
+
+=item authenticate
+
+This is called early in the Maypole request workflow, and is used as the hook to 
+call C<get_session>. If you are writing your own C<authenticate> method(s), either in 
+model classes or in the request classes, make sure your C<authenticate> method calls 
+C<get_session>.
     
 =cut
 
+sub authenticate
 {
-    no warnings 'redefine';
+    my ( $r ) = @_;
     
-    sub Maypole::authenticate
-    {
-        my ( $r ) = @_;
-        
-        $r->get_session;
-        
-        return Maypole::Constants::OK;  
-    }
+    $r->get_session;
+    
+    return Maypole::Constants::OK;  
 }
+
+=item get_session
+
+Retrieves the cookie from the browser and matches it up with a session in the store. Puts
+the session in the C<session> slot of the request. 
+
+You should call this method inside any custom C<authenticate> methods.
+
+=cut
 
 # - combines get_user and login_user from MP::P::Authentication::UserSessionCookie
 sub get_session
@@ -86,9 +121,9 @@ sub get_session
     
     $session_class->require || die "Couldn't load session class $session_class";
     
-    my $session_args  = $r->config->session->{args} || { Directory     => "/tmp/sessions",
-                                                         LockDirectory => "/tmp/sessionlock",
-                                                         };
+    my $session_args = $r->config->session->{args} || { Directory     => "/tmp/sessions",
+                                                        LockDirectory => "/tmp/sessionlock",
+                                                        };
     
     my %session = ();
     
@@ -137,28 +172,7 @@ sub _delete_cookie
                      );
 }
 
-=item delete_session
-
-Deletes the session and cookie.
-
 =back
-
-=cut
-
-# like MP::P::Authentication::UserSessionCookie::logout()
-sub delete_session
-{
-    my ( $r ) = @_;
-    
-    if ( $r->session ) 
-    {
-        my $s = tied( %{$r->session} );
-        
-        $s->delete if ref $s;
-    }
-    
-    $r->_delete_cookie;
-}
 
 =head1 Configuration
 
