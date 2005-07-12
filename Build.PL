@@ -11,6 +11,7 @@ my $builder = Module::Build->new(
         'Test::More' => 0,
         'CGI::Simple::Cookie' => 0,
         'Maypole' => 2,
+        'URI'     => 0,
     },
     add_to_cleanup      => [ 'Maypole-Plugin-Session-*' ],
     create_makefile_pl  => 'traditional',

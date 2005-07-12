@@ -8,6 +8,7 @@ use Maypole::Constants ();
 use Maypole::Config ();
 
 use CGI::Simple::Cookie ();
+use URI();
 
 Maypole::Config->mk_accessors('session');
 Maypole->mk_accessors( 'session' );
@@ -19,7 +20,7 @@ Maypole::Plugin::Session - simple sessions for Maypole
 
 =cut
 
-our $VERSION = 0.02;
+our $VERSION = 0.1;
 
 =head1 SYNOPSIS
 
