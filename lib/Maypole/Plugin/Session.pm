@@ -1,18 +1,17 @@
 package Maypole::Plugin::Session;
 
+use 5.005;
 use warnings;
 use strict;
 
-use Maypole ();
-use Maypole::Constants ();
-use Maypole::Config ();
+use Maypole();
+use Maypole::Config();
+use Maypole::Constants();
 
-use CGI::Simple::Cookie ();
-use URI();
+use Apache::Session::Wrapper 0.24;
 
 Maypole::Config->mk_accessors('session');
-Maypole->mk_accessors( 'session' );
-
+Maypole->mk_accessors( 'apache_session_wrapper' );
 
 =head1 NAME
 
@@ -20,7 +19,7 @@ Maypole::Plugin::Session - simple sessions for Maypole
 
 =cut
 
-our $VERSION = 0.1;
+our $VERSION = 0.2;
 
 =head1 SYNOPSIS
 
@@ -29,21 +28,94 @@ our $VERSION = 0.1;
     # Elsewhere in your app:
     my $session = $r->session;
     
+=head1 API CHANGES
+
+This version is a re-write using L<Apache::Session::Wrapper>. As such, the configuration parameters
+have changed - use L<Apache::Session::Wrapper> settings rather than L<Apache::Session> settings. 
+See B<Configuration>.
+    
 =head1 DESCRIPTION
 
-L<Maypole::Plugin::Authentication::UserSessionCookie|Maypole::Plugin::Authentication::UserSessionCookie> 
-has a cryptic paragraph explaining how to use that module to support basic sessions without users. This 
-module saves you from having to figure it out. 
+Provides C<session> and C<delete_session> methods for your Maypole request class. The session is 
+implemented using L<Apache::Session::Wrapper>, and as such, a range of session store mechanisms 
+are available. 
 
-Provides C<session> and C<delete_session> methods for your Maypole request class. 
+=head1 CONFIGURATION
 
-=head1 PUBLIC METHODS
+The B<Configuration> section of the L<Apache::Session::Wrapper> docs lists all the 
+available parameters. These should be placed in the C<Maypole::Config::session> slot as a hashref. 
+
+=over 4
+
+=item setup
+
+If there are no settings in C<< Maypole::Config->session >>, then default settings for L<Apache::Session::File> 
+are placed there. Also, cookies are turned on by default:
+
+    $config->{session} = { class          => 'File',
+                           directory      => "/tmp/sessions",
+                           lock_directory => "/tmp/sessionlock",
+                     
+                           use_cookie => 1,
+                           cookie_name => 'maypole-plugin-session-cookie',
+                           };
+                         
+You need to create these directories with appropriate permissions if you
+want to use these defaults.
+
+You can place custom settings there either before (preferably) or after (probably OK) 
+calling C<< Maypole->setup >>, e.g.
+
+    $r->config->session( { class     => "Flex",
+                           store     => 'DB_File',
+                           lock      => 'Null',
+                           generate  => 'MD5',
+                           serialize => 'Storable'
+                           } );
+
+=cut
+
+sub setup
+{
+    my $r = shift; # class name
+    
+    warn "Running " . __PACKAGE__ . " setup for $r" if $r->debug;
+    
+    # Apache::Session::Wrapper will use add() to set the cookie under CGI
+    *Maypole::Headers::add = \&Maypole::Headers::push;
+    
+    my %defaults = ( class          => 'File',
+                     directory      => "/tmp/sessions",
+                     lock_directory => "/tmp/sessionlock",
+            
+                     use_cookie  => 1,
+                     cookie_name => 'maypole-plugin-session-cookie',
+                     );
+                      
+    my $cfg = $r->config->session || {};
+    
+    if ( keys %$cfg )
+    {
+        exists $cfg->{use_cookie}  or $cfg->{use_cookie}  = $defaults{use_cookie};
+        exists $cfg->{cookie_name} or $cfg->{cookie_name} = $defaults{cookie_name};
+    }
+    else
+    {
+        %$cfg = %defaults;
+    }
+                              
+    $r->NEXT::DISTINCT::setup( @_ );
+}
+
+=back
+
+=head1 METHODS
 
 =over 4
 
 =item session
 
-Returns the session object/hash.
+Returns the session hashref.
 
 =item delete_session
 
@@ -51,20 +123,8 @@ Deletes the session and cookie.
 
 =cut
 
-# like MP::P::Authentication::UserSessionCookie::logout()
-sub delete_session
-{
-    my ( $r ) = @_;
-    
-    if ( $r->session ) 
-    {
-        my $s = tied( %{$r->session} );
-        
-        $s->delete if ref $s;
-    }
-    
-    $r->_delete_cookie;
-}
+sub session        { shift->apache_session_wrapper->session( @_ ) }
+sub delete_session { shift->apache_session_wrapper->delete_session( @_ ) }
 
 =back
 
@@ -95,125 +155,31 @@ sub authenticate
 
 =item get_session
 
-Retrieves the cookie from the browser and matches it up with a session in the store. Puts
-the session in the C<session> slot of the request. 
+Retrieves the cookie from the browser and matches it up with a session in the store. 
 
 You should call this method inside any custom C<authenticate> methods.
 
 =cut
 
-# - combines get_user and login_user from MP::P::Authentication::UserSessionCookie
 sub get_session
 {
     my ( $r ) = @_;
     
-    my %jar = CGI::Simple::Cookie->parse( $r->headers_in->get( 'Cookie' ) );
+    # returning 1 silences an anonymous warning
+    $r->can( 'ar' ) && $r->ar && $r->ar->register_cleanup( sub { $r->apache_session_wrapper->cleanup_session; 1 } );
     
-    my $cookie_name = $r->config->{session}->{cookie_name} || "sessionid";
-    
-    my $sid = $jar{ $cookie_name }->value if exists $jar{ $cookie_name };
-    
-    warn "SID from cookie: $sid" if $r->debug && defined $sid;
-    
-    # Clear it, as 0 is a valid sid.
-    $sid = undef unless $sid; 
-    
-    my $session_class = $r->config->session->{class} || 'Apache::Session::File';
-    
-    $session_class->require || die "Couldn't load session class $session_class";
-    
-    my $session_args = $r->config->session->{args} || { Directory     => "/tmp/sessions",
-                                                        LockDirectory => "/tmp/sessionlock",
-                                                        };
-    
-    my %session = ();
-    
-    eval { tie %session, $session_class, $sid, $session_args };
-    
-    if ( $@ ) 
-    { 
-        die $@ unless $@ =~ /does not exist in the data store/;
-        
-        warn "Session $sid does not exist in the data store - deleting cookie" if $r->debug;
-        
-        return $r->_delete_cookie;
-    }
-    
-    $r->_set_cookie( value   => $session{_session_id}, 
-                     expires => $r->config->session->{cookie_expiry} || '+3M',
-                     );
-    
-    $r->session( \%session );
-}
-
-sub _set_cookie
-{
-    my ( $r, %cookie ) = @_;
-    
-    my $cookie_name = $r->config->session->{cookie_name} || "sessionid";
-    
-    my $cookie = CGI::Simple::Cookie->new(
-        -name       => $cookie_name,
-        -value      => $cookie{value},
-        -expires    => $cookie{expires},
-        -path       => URI->new($r->config->uri_base)->path
-        );
-        
-    warn "Baking: ". $cookie->as_string if $r->debug;
-    
-    $r->headers_out->set( 'Set-Cookie', $cookie->as_string );
-}
-
-sub _delete_cookie
-{
-    my ( $r ) = @_;
-    
-    $r->_set_cookie( value   => '',
-                     expires => '-10m',
-                     );
+    $r->{apache_session_wrapper} =
+        Apache::Session::Wrapper->new( header_object => $r, 
+                                       param_object  => $r, 
+                                       %{ $r->config->session },
+                                       );    
 }
 
 =back
 
-=head1 Configuration
-
-The class provides sensible defaults for all that it does, but you can
-change its operation through Maypole configuration parameters.
-
-First, the session data. This is retrieved as follows. The Maypole
-configuration parameter C<<$config->session->{class}>> is
-used as a class to tie the session hash, and this defaults to
-C<Apache::Session::File>. The parameters to the tie are the session ID
-and the value of the C<<$config->session->{args}>>
-configuration parameter. This defaults to:
-
-    { Directory     => "/tmp/sessions", 
-      LockDirectory => "/tmp/sessionlock" 
-      }
-
-You need to create these directories with appropriate permissions if you
-want to use these defaults.
-
-For instance, you might instead want to say:
-
-    $r->config->session({
-        class => "Apache::Session::Flex",
-        args  => {
-            Store     => 'DB_File',
-            Lock      => 'Null',
-            Generate  => 'MD5',
-            Serialize => 'Storable'
-         }
-    });
-
-The cookie name is retrieved from C<<$config->session->{cookie_name}>>
-but defaults to "sessionid". It defaults to expiry after 3 months, and 
-this can be set in C<<$config->session->{cookie_expiry}>.
-
 =head1 SEE ALSO
 
-L<Maypole::Plugin::Authentication::UserSessionCookie|Maypole::Plugin::Authentication::UserSessionCookie>, 
-from which nearly all of the code was stolen. 
+L<Apache::Session::Wrapper>. 
 
 =head1 AUTHOR
 

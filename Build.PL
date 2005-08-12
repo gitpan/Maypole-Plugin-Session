@@ -9,9 +9,8 @@ my $builder = Module::Build->new(
     dist_version_from   => 'lib/Maypole/Plugin/Session.pm',
     requires => {
         'Test::More' => 0,
-        'CGI::Simple::Cookie' => 0,
+        'Apache::Session::Wrapper' => 0.24,
         'Maypole' => 2,
-        'URI'     => 0,
     },
     add_to_cleanup      => [ 'Maypole-Plugin-Session-*' ],
     create_makefile_pl  => 'traditional',

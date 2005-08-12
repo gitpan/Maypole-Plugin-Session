@@ -5,10 +5,9 @@ WriteMakefile
           'NAME' => 'Maypole::Plugin::Session',
           'VERSION_FROM' => 'lib/Maypole/Plugin/Session.pm',
           'PREREQ_PM' => {
-                           'CGI::Simple::Cookie' => '0',
+                           'Apache::Session::Wrapper' => '0.24',
                            'Maypole' => '2',
-                           'Test::More' => '0',
-                           'URI' => '0'
+                           'Test::More' => '0'
                          },
           'INSTALLDIRS' => 'site',
           'PL_FILES' => {}
